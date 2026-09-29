@@ -118,6 +118,11 @@ function HomePage() {
                         }`}>
                           {item.urgency}
                         </span>
+                        {item.usedFallback && (
+                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
+                            Keyword fallback
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
