@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { categorizeMessage } from '../utils/llmHelper'
-import { calculateUrgency } from '../utils/urgencyScorer'
-import { getRecommendedAction } from '../utils/templates'
 
 function AnalyzePage() {
   const [message, setMessage] = useState('')
@@ -28,19 +26,15 @@ function AnalyzePage() {
     setResults(null)
     
     try {
-      // Run categorization (LLM call)
-      const { category, reasoning, usedFallback } = await categorizeMessage(message)
-      
-      // Calculate urgency (rule-based)
-      const urgency = calculateUrgency(message)
-      
-      // Get recommended action (template-based)
-      const recommendedAction = getRecommendedAction(category)
-      
+      // Category, urgency, reasoning and recommended action come from one analysis
+      const { category, reasoning, urgency, urgencyReasoning, recommendedAction, usedFallback } =
+        await categorizeMessage(message)
+
       const analysisResult = {
         message,
         category,
         urgency,
+        urgencyReasoning,
         recommendedAction,
         reasoning,
         usedFallback,
@@ -132,7 +126,7 @@ function AnalyzePage() {
 
             {results.usedFallback && (
               <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 text-sm">
-                ⚠️ AI is currently unavailable. This result came from a basic keyword matcher and may be less accurate.
+                ⚠️ AI is currently unavailable. This result came from basic keyword rules (category, urgency and action) and may be less accurate.
               </div>
             )}
 
@@ -153,6 +147,9 @@ function AnalyzePage() {
                 }`}>
                   {results.urgency}
                 </div>
+                {results.urgencyReasoning && (
+                  <p className="text-sm text-gray-600 mt-2">{results.urgencyReasoning}</p>
+                )}
               </div>
 
               <div>
@@ -177,7 +174,7 @@ function AnalyzePage() {
             <div className="mt-6 pt-4 border-t border-gray-200">
               <button
                 onClick={() => {
-                  const text = `Category: ${results.category}\nUrgency: ${results.urgency}\nRecommendation: ${results.recommendedAction}\n\nReasoning: ${results.reasoning}`
+                  const text = `Category: ${results.category}\nUrgency: ${results.urgency}${results.urgencyReasoning ? ` (${results.urgencyReasoning})` : ''}\nRecommendation: ${results.recommendedAction}\n\nReasoning: ${results.reasoning}`
                   navigator.clipboard.writeText(text)
                   alert('Results copied to clipboard!')
                 }}

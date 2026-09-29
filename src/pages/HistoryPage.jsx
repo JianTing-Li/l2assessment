@@ -149,6 +149,14 @@ function HistoryPage() {
                         {item.message}
                       </div>
                     </div>
+                    {item.urgencyReasoning && (
+                      <div>
+                        <div className="text-xs font-semibold text-gray-600 mb-1">Urgency Reasoning</div>
+                        <div className="text-sm text-gray-800 bg-white p-3 rounded border border-gray-200">
+                          {item.urgencyReasoning}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <div className="text-xs font-semibold text-gray-600 mb-1">Recommended Action</div>
                       <div className="text-sm text-gray-800 bg-purple-50 p-3 rounded border border-purple-200">
