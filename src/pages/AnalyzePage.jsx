@@ -29,7 +29,7 @@ function AnalyzePage() {
     
     try {
       // Run categorization (LLM call)
-      const { category, reasoning } = await categorizeMessage(message)
+      const { category, reasoning, usedFallback } = await categorizeMessage(message)
       
       // Calculate urgency (rule-based)
       const urgency = calculateUrgency(message)
@@ -43,6 +43,7 @@ function AnalyzePage() {
         urgency,
         recommendedAction,
         reasoning,
+        usedFallback,
         timestamp: new Date().toISOString()
       }
 
@@ -128,7 +129,13 @@ function AnalyzePage() {
         {results && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Analysis Results</h2>
-            
+
+            {results.usedFallback && (
+              <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 text-sm">
+                ⚠️ AI is currently unavailable. This result came from a basic keyword matcher and may be less accurate.
+              </div>
+            )}
+
             <div className="space-y-4">
               <div>
                 <div className="text-sm font-semibold text-gray-600 mb-1">Category</div>

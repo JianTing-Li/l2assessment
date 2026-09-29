@@ -127,6 +127,11 @@ function HistoryPage() {
                       }`}>
                         {item.urgency} Urgency
                       </span>
+                      {item.usedFallback && (
+                        <span className="text-xs px-3 py-1 rounded-full font-semibold bg-amber-100 text-amber-800">
+                          Keyword fallback
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-gray-400 ml-4">
