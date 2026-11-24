@@ -1,121 +1,116 @@
-# Customer Inbox Triage App
+# Relay AI: Customer Inbox Triage
 
-## Overview
+Paste a customer support message, or a whole batch, and get:
 
-The Customer Inbox Triage app is a lightweight AI-powered tool that helps classify customer support messages and recommend actions. It uses Groq AI to categorize messages, applies rule-based urgency scoring, and suggests next steps based on predefined templates.
+- **Category** (Billing Issue, Technical Problem, Feature Request, General Inquiry, Positive Feedback, or your own)
+- **Urgency** (High / Medium / Low) with the reason
+- **Team to route it to** and a **recommended next step**
+- A **draft reply** to send the customer
+- **Confidence**, a **needs review** flag, **sentiment**, **product area**, **language**, and any **order or invoice IDs** in the message
 
-## Problem Statement
+Results land in a **queue** where agents set a status (Open, In progress, Resolved), search and filter, and **correct** the category or urgency. Corrections are sent back to the AI as examples, and the dashboard shows how often agents keep the AI's answer.
 
-Support teams waste time manually reading and triaging customer messages. This tool provides an automated first pass at classification to help prioritize and route messages more efficiently.
+## Tech stack
 
-## Tech Stack
+- React 19 + Vite + Tailwind CSS
+- Groq API (`openai/gpt-oss-20b` by default), called from a server endpoint so the API key never reaches the browser
+- Vercel serverless functions in `api/`; the Vite dev server serves the same routes locally
+- Vitest for tests; data stays in the browser's localStorage
 
-- **Frontend**: React + Vite + Tailwind CSS
-- **AI**: Groq API (Llama 3.3 70B - Free tier)
-- **Runtime**: Browser-based (local development only)
+## Setup
 
-## Setup Instructions
+You need Node.js 20+ and a free Groq API key from [console.groq.com/keys](https://console.groq.com/keys) (no credit card).
 
-### Prerequisites
-
-- Node.js (v16 or higher)
-- npm or yarn
-- Groq API key (FREE - get from https://console.groq.com)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd "L2 assessment"
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Configure Groq API Key**
-   
-   Create a `.env.local` file in the root directory:
-   ```bash
-   cp .env.example .env.local
-   ```
-   
-   Edit `.env.local` and add your Groq API key:
-   ```
-   VITE_GROQ_API_KEY=gsk_your-actual-key-here
-   ```
-   
-   Get your FREE API key from: https://console.groq.com/keys
-   
-   **Why Groq?** Groq offers a generous free tier with fast inference and no credit card required!
-
-4. **Run the application**
-   ```bash
-   npm run dev
-   ```
-   
-   The app will be available at `http://localhost:5173`
-
-## How It Works
-
-1. **Paste Message**: User pastes a customer support message into the text area
-2. **Analyze**: Click "Analyze Message" to process the input
-3. **Classification**: The app runs three processes in parallel:
-   - **Category Classification** (LLM): Uses Groq AI (Llama 3.3 70B) to categorize the message
-   - **Urgency Scoring** (Rule-based): Applies simple rules to determine urgency
-   - **Recommendation** (Template-based): Maps category to a recommended action
-4. **Display Results**: Shows category, urgency tag, recommended action, and AI reasoning
-5. **History**: All analyses are saved to localStorage and viewable in the History tab
-
-
-## Example Test Messages
-
-Try analyzing these messages to see how the triage system works:
-
-### Example 1: Production Issue
-```
-Our production server is down
+```bash
+npm install
 ```
 
-### Example 2: Customer Feedback
-```
-Hi there! I just wanted to say thank you for your amazing customer service. I've been using your product for three years now and I'm really happy with it. Keep up the great work!
-```
-
-### Example 3: Feature Request
-```
-I would love to see a dark mode option in the app. It would be much easier on my eyes during night time usage.
+```bash
+cp .env.example .env.local
 ```
 
-### Example 4: Payment Issue
-```
-I tried to update my payment method but the page keeps loading forever. Is this a known issue?
-```
+Edit `.env.local`:
 
-### Example 5: Billing Question
 ```
-Can I upgrade my subscription to the pro plan?
+GROQ_API_KEY=gsk_your-key-here
 ```
 
-### Example 6: Technical Support
+```bash
+npm run dev
 ```
-The dashboard won't load when I try to access it. I've tried refreshing but it keeps timing out.
+
+Open http://localhost:5173. Without a key the app still works: it falls back to keyword rules and says why on each result.
+
+### Optional settings (`.env.local` or Vercel project settings)
+
+| Variable | What it does |
+|---|---|
+| `GROQ_MODEL` | Use a different Groq model. Groq retires models often; pick one your account lists at console.groq.com. |
+| `SLACK_WEBHOOK_URL` | Post High-urgency messages to a Slack channel ([Incoming Webhook](https://api.slack.com/messaging/webhooks)). Can be turned off on the Settings page. |
+
+The older `VITE_GROQ_API_KEY` name still works, but rename it to `GROQ_API_KEY`.
+
+## Deploying
+
+The repo is ready for Vercel: import it, add `GROQ_API_KEY` as an environment variable, and deploy. `api/triage.js` and `api/alert.js` become serverless functions, and `vercel.json` sends every other path to the React app.
+
+Note that `/api/triage` is public once deployed, so anyone who finds it can use your Groq quota. Add authentication or rate limiting before sharing it widely.
+
+## How it works
+
+```
+Browser                                   Server (api/ on Vercel, vite.config.js locally)
+───────                                   ──────
+AnalyzePage ─ triage.js ─ llmHelper.js ──► POST /api/triage ── server/triage.js ──► Groq (JSON mode)
+                  │            │                                    builds the prompt from your categories
+                  │            └─ parseAiResponse: validates every     and recent agent corrections
+                  │               field, fills gaps from keyword rules
+                  │
+                  ├─ keywordRules.js + urgencyScorer.js   offline fallback and business rules
+                  ├─ extract.js                           reference IDs, batch/CSV parsing
+                  └─ storage.js                           history in localStorage (last 500)
 ```
 
-## Security Note
+- **One AI call per message** returns every field as JSON. Anything missing or invalid is filled from the keyword rules, and the result is marked low confidence.
+- **Business rules on top of the AI**: plan changes (upgrade, downgrade, cancel a plan) are always Billing, and messages under three words are always low confidence.
+- **Urgency depends on impact** (outage, lost connection, locked out, data loss, security, payment failure, double charge), not on punctuation, length or time of day.
+- **Fallback**: if the AI is unavailable (no key, bad key, rate limit, retired model, network), keyword rules produce the category, urgency and action, and the result says why. Rate limits get one retry first.
+- **Batches** run three messages at a time, up to 50 per batch.
 
-⚠️ **Warning**: This application exposes the Groq API key in the browser (using `dangerouslyAllowBrowser: true`). This is acceptable for local development only but should **NEVER** be done in production. In a real application, API calls should be made from a secure backend server.
+## Pages
 
-## Why Groq?
+| Page | What it's for |
+|---|---|
+| Home | Today's numbers, the open queue, recent activity |
+| Analyze | One message or a batch (paste, or upload a CSV/text file) |
+| Queue | Status, search, filters, sorting, corrections, draft replies |
+| Dashboard | Volume per day by urgency, category mix, AI accuracy, insights, CSV export |
+| Settings | Category descriptions sent to the AI, teams, actions, custom categories, Slack alerts |
 
-- ✅ **Completely Free** - No credit card required
-- ✅ **Fast Inference** - Groq's LPU technology is incredibly fast
-- ✅ **Generous Limits** - ~14,400 requests/day on free tier
-- ✅ **High Quality** - Llama 3.3 70B performs excellently
-- ✅ **Easy Signup** - Get started in minutes at https://console.groq.com
+## Tests
+
+```bash
+npm test
+```
+
+Unit tests cover the keyword rules (against every message in `sample-messages.json`), AI reply parsing, fallback handling, CSV and batch parsing, storage, settings, corrections, stats and the server endpoint.
+
+```bash
+npm run eval
+```
+
+Runs `sample-messages.json` through the live model and compares it with the expected category and urgency. Use it after changing the prompt or the model.
+
+## Troubleshooting
+
+| Banner says | Fix |
+|---|---|
+| No Groq API key is set | Add `GROQ_API_KEY` to `.env.local` and restart `npm run dev` |
+| The Groq API key was rejected | Make a new key at console.groq.com/keys |
+| The configured Groq model is not available | Set `GROQ_MODEL` to a model your account lists |
+| Rate limit was hit | Wait a minute; the free tier limits requests per minute |
+| Could not reach /api/triage | Run the app with `npm run dev` or `npm run preview`, not by opening `dist/index.html` |
 
 ## License
 
-This project is for educational purposes only.
+For educational purposes only.

@@ -14,9 +14,20 @@ const BASE_URGENCY = {
   "Unknown": "Medium"
 }
 
+// "Server down", "site is down", "everything went down" (but not "slow down" or "download")
+export const DOWN_PATTERN = /\b(servers?|site|website|app|apps|service|services|system|systems|database|db|api|platform|everything|portal|checkout|login|network)( is| are| was| went| goes| has gone| seems| appears to be)? (completely |totally )?down\b|\b(is|are|was|went|goes|has gone) (completely |totally )?down\b|\bdowntime\b/
+
+// "Database connection lost", "lost connection", "keeps disconnecting"
+export const CONNECTION_LOST_PATTERN = /\b(connection|database|db) (was |is |has been )?(lost|dropped|refused|failed|down)\b|\b(lost|losing|no) connection\b|\bdisconnect(ed|ing|s)?\b/
+
+// A plan change needs both the verb and a plan noun close together, so
+// "upgrade the editor to support markdown" stays a feature request.
+export const PLAN_CHANGE = /\b(upgrad(e|ing)|downgrad(e|ing)|cancel(l?ing)?|switch(ing)?|chang(e|ing)|renew(ing)?)\b(\s+[\w'-]+){0,4}?\s+(plan|subscription|tier|membership|license|seats?)\b|\b(upgrad(e|ing)|downgrad(e|ing))\s+to\s+(the\s+)?(pro|premium|business|enterprise|team|basic|starter|annual|monthly)\b|\bcancel(l?ing)?\s+(my|our|the)\s+account\b/i
+
 // Signals that a customer is blocked or that something is broken for everyone
 const HIGH_SIGNALS = [
-  { pattern: /\b(is|are|was|went|goes|has gone) down\b|\bdowntime\b/, label: 'service down' },
+  { pattern: DOWN_PATTERN, label: 'service down' },
+  { pattern: CONNECTION_LOST_PATTERN, label: 'connection lost' },
   { pattern: /\boutages?\b/, label: 'outage' },
   { pattern: /\bproduction\b/, label: 'production' },
   { pattern: /\b(can't|cannot|unable to) (log ?in|sign ?in|access|use)\b/, label: "can't access" },
@@ -57,6 +68,10 @@ export function calculateUrgency(message, category) {
 
   if (signals.length > 0) {
     return { urgency: "High", reasoning: `Signals that the customer is blocked or a service is affected: ${signals.join(', ')}.` }
+  }
+
+  if (category === "Billing Issue" && PLAN_CHANGE.test(text)) {
+    return { urgency: "Low", reasoning: "A routine plan change request is not time-sensitive." }
   }
 
   return { urgency: base, reasoning: `A ${category.toLowerCase()} with no sign that the customer is blocked, so it is treated as ${base.toLowerCase()} priority.` }

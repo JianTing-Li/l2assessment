@@ -1,0 +1,158 @@
+/**
+ * Keyword rules: the offline fallback used when the AI is unavailable, plus
+ * business rules applied on top of the AI's answer.
+ */
+import { calculateUrgency, DOWN_PATTERN, CONNECTION_LOST_PATTERN, PLAN_CHANGE } from './urgencyScorer';
+
+export { PLAN_CHANGE };
+import { getRecommendedAction } from './templates';
+
+
+/**
+ * Keyword rules per category. Each rule is a whole-word regex with a weight:
+ * phrases weigh more than single words, so "payment failed" outranks a lone "issue".
+ */
+export const CATEGORY_RULES = {
+  "Billing Issue": [
+    { pattern: /\bpayment (failed|declined|issue|problem)/, weight: 3 },
+    { pattern: /\b(double|over)[- ]?charged\b/, weight: 2 },
+    { pattern: /\bcredit card\b/, weight: 2 },
+    { pattern: PLAN_CHANGE, weight: 3, label: 'plan change' },
+    { pattern: /\bbill(s|ed|ing)?\b/, weight: 1 },
+    { pattern: /\bpayments?\b/, weight: 1 },
+    { pattern: /\bcharg(e|es|ed|ing)\b/, weight: 1 },
+    { pattern: /\binvoices?\b/, weight: 1 },
+    { pattern: /\brefunds?\b/, weight: 1 },
+    { pattern: /\bsubscriptions?\b/, weight: 1 },
+    { pattern: /\bplans?\b/, weight: 1 },
+    { pattern: /\breceipts?\b/, weight: 1 },
+    { pattern: /\bpric(e|es|ing)\b/, weight: 1 },
+  ],
+  "Technical Problem": [
+    { pattern: /\bnot working\b/, weight: 2 },
+    { pattern: /\b(can't|cannot|unable to) (log ?in|sign ?in|access|load|open)\b/, weight: 2 },
+    { pattern: /\b(doesn't|does not|won't|will not) (work|load|open)\b/, weight: 2 },
+    { pattern: DOWN_PATTERN, weight: 2, label: 'down' },
+    { pattern: CONNECTION_LOST_PATTERN, weight: 2, label: 'connection problem' },
+    { pattern: /\bdatabase\b/, weight: 1 },
+    { pattern: /\bbugs?\b/, weight: 1 },
+    { pattern: /\berrors?\b/, weight: 1 },
+    { pattern: /\bbroken\b/, weight: 1 },
+    { pattern: /\bcrash(es|ed|ing)?\b/, weight: 1 },
+    { pattern: /\boutages?\b/, weight: 1 },
+    { pattern: /\bservers?\b/, weight: 1 },
+    { pattern: /\bproduction\b/, weight: 1 },
+    { pattern: /\bslow(ly)?\b/, weight: 1 },
+    { pattern: /\bloading\b/, weight: 1 },
+    { pattern: /\bfreez(e|es|ing)\b|\bfrozen\b/, weight: 1 },
+    { pattern: /\bglitch(es)?\b/, weight: 1 },
+    { pattern: /\bfail(s|ed|ing|ure)?\b/, weight: 1 },
+    { pattern: /\bissues?\b/, weight: 1 },
+    { pattern: /(?<!no )\bproblems?\b/, weight: 1 },
+  ],
+  "Feature Request": [
+    { pattern: /\b(can|could|would) you (please )?add\b/, weight: 2 },
+    { pattern: /\bplease add\b/, weight: 2 },
+    { pattern: /\bwould (like to see|love to see|be great|be nice)\b/, weight: 2 },
+    { pattern: /\bfeatures?\b/, weight: 1 },
+    { pattern: /\bsuggest(ion|ions|ed)?\b/, weight: 1 },
+    { pattern: /\bimprove(ment|ments)?\b/, weight: 1 },
+    { pattern: /\benhancements?\b/, weight: 1 },
+    { pattern: /\bwish\b/, weight: 1 },
+  ],
+  "General Inquiry": [
+    { pattern: /\b(can i|is there|do you|are there)\b/, weight: 1.5 },
+    { pattern: /\b(how|what|when|where|which|why)\b/, weight: 1 },
+    { pattern: /\?/, weight: 0.5, label: '?' },
+  ],
+  "Positive Feedback": [
+    // Gratitude only counts when the message isn't a "thanks, but..." complaint
+    { pattern: /^(?!.*\b(but|however)\b).*\b(thanks?|thank you|appreciate)\b/, weight: 1, label: 'thanks' },
+    { pattern: /\bkeep up the (great|good) work\b/, weight: 2 },
+    { pattern: /\b(great|amazing|excellent|awesome|fantastic|wonderful) (job|work|service|support|product)\b/, weight: 2 },
+    { pattern: /\b(really |very )?(happy|satisfied|pleased) with\b/, weight: 1 },
+    { pattern: /\bi (love|really like) (using|your|the)\b/, weight: 1 },
+    { pattern: /\b(amazing|excellent|awesome|fantastic|wonderful)\b/, weight: 1 },
+    { pattern: /\bpositive feedback\b|\b(really |so |very )?(nice|great|beautiful|clean|lovely) (design|look|layout|job|work)\b|\blooks (so |really |very )?(great|good|nice|professional|clean)\b/, weight: 2, label: 'praise' },
+  ],
+};
+
+/**
+ * Keyword-based fallback used when the AI is unavailable.
+ * Scores every category and picks the highest; ties or no matches return
+ * "Unknown" (which templates.js maps to manual review) instead of guessing.
+ * Urgency and the recommended action come from the rule-based helpers.
+ */
+export function getKeywordAnalysis(message, actionFor = getRecommendedAction) {
+  const { category, reasoning, confidence } = getKeywordCategorization(message);
+  const { urgency, reasoning: urgencyReasoning } = calculateUrgency(message, category);
+  return {
+    category,
+    reasoning,
+    urgency,
+    urgencyReasoning,
+    confidence,
+    sentiment: detectSentiment(message),
+    productArea: '',
+    language: '',
+    recommendedAction: actionFor(category, urgency),
+    suggestedReply: '',
+  };
+}
+
+const ANGRY = /\b(unacceptable|ridiculous|furious|outrageous|worst|terrible|horrible|scam|disgusting|fed up|sick of)\b/;
+const FRUSTRATED = /\b(frustrat\w*|annoy\w*|disappoint\w*|still (not|doesn't|isn't|can't)|again|keeps?|yet another|waste of time|upset)\b/;
+
+/** Rough tone of the message, used only when the AI is unavailable. */
+export function detectSentiment(message) {
+  const text = message.toLowerCase().replace(/[‘’]/g, "'");
+  if (ANGRY.test(text) || /!!+/.test(text)) return 'Angry';
+  if (FRUSTRATED.test(text)) return 'Frustrated';
+  if (CATEGORY_RULES['Positive Feedback'].some(({ pattern }) => pattern.test(text))) return 'Positive';
+  return 'Neutral';
+}
+
+export function getKeywordCategorization(message) {
+  const text = message.toLowerCase().replace(/[‘’]/g, "'");
+
+  const scored = Object.entries(CATEGORY_RULES).map(([category, rules]) => {
+    let score = 0;
+    const matches = [];
+    for (const { pattern, weight, label } of rules) {
+      const match = text.match(pattern);
+      if (match) {
+        score += weight;
+        matches.push(label || match[0].trim());
+      }
+    }
+    return { category, score, matches };
+  });
+
+  const best = Math.max(...scored.map(s => s.score));
+  const leaders = scored.filter(s => s.score === best);
+
+  if (best === 0) {
+    return {
+      category: "Unknown",
+      reasoning: "No clear keywords matched. Manual review recommended.",
+      confidence: "Low"
+    };
+  }
+
+  if (leaders.length > 1) {
+    return {
+      category: "Unknown",
+      reasoning: `Mixed signals (${leaders.map(l => l.category).join(', ')}). Manual review recommended.`,
+      confidence: "Low"
+    };
+  }
+
+  const [winner] = leaders;
+  const runnerUp = Math.max(0, ...scored.filter(s => s !== winner).map(s => s.score));
+  return {
+    category: winner.category,
+    reasoning: `Matched keywords: ${winner.matches.join(', ')} → ${winner.category}.`,
+    // Keyword matching is never "High" confidence; a clear lead earns "Medium"
+    confidence: winner.score >= 2 && winner.score - runnerUp >= 1.5 ? "Medium" : "Low"
+  };
+}
