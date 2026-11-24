@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { categorizeMessage } from '../utils/llmHelper'
+import { categorizeMessage, FALLBACK_MESSAGES } from '../utils/llmHelper'
 import { addToHistory, makeId } from '../utils/storage'
 
 function AnalyzePage() {
@@ -28,19 +28,13 @@ function AnalyzePage() {
     
     try {
       // Category, urgency, reasoning and recommended action come from one analysis
-      const { category, reasoning, urgency, urgencyReasoning, recommendedAction, usedFallback } =
-        await categorizeMessage(message)
+      const analysis = await categorizeMessage(message)
 
       const analysisResult = {
+        ...analysis,
         id: makeId(),
         status: 'Open',
         message,
-        category,
-        urgency,
-        urgencyReasoning,
-        recommendedAction,
-        reasoning,
-        usedFallback,
         timestamp: new Date().toISOString()
       }
 
@@ -127,7 +121,7 @@ function AnalyzePage() {
 
             {results.usedFallback && (
               <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 text-sm">
-                ⚠️ AI is currently unavailable. This result came from basic keyword rules (category, urgency and action) and may be less accurate.
+                ⚠️ AI unavailable: {FALLBACK_MESSAGES[results.fallbackReason] || 'Unknown error.'} This result came from basic keyword rules and may be less accurate.
               </div>
             )}
 

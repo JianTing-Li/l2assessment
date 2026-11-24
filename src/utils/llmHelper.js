@@ -1,249 +1,134 @@
-import Groq from 'groq-sdk';
-import { calculateUrgency, DOWN_PATTERN, CONNECTION_LOST_PATTERN } from './urgencyScorer';
+import { calculateUrgency } from './urgencyScorer';
 import { getRecommendedAction } from './templates';
+import { getKeywordAnalysis, PLAN_CHANGE } from './keywordRules';
 
 /**
- * LLM Helper for analyzing customer support messages
- * Using Groq API for AI-powered categorization, urgency and recommended action
+ * Client side of the AI triage. The browser calls /api/triage (served by
+ * api/triage.js on Vercel or vite.config.js locally); the Groq key stays on the server.
  */
 
-// Initialize Groq client lazily: the SDK throws if the key is missing, which
-// would crash the whole app at import time.
-let groq = null;
-function getGroqClient() {
-  if (!groq) {
-    groq = new Groq({
-      apiKey: import.meta.env.VITE_GROQ_API_KEY,
-      dangerouslyAllowBrowser: true // Required for browser-based calls (not recommended for production!)
-    });
-  }
-  return groq;
-}
+export const URGENCY_LEVELS = ['High', 'Medium', 'Low'];
+export const CONFIDENCE_LEVELS = ['High', 'Medium', 'Low'];
+export const SENTIMENTS = ['Angry', 'Frustrated', 'Neutral', 'Positive'];
 
-const URGENCY_LEVELS = ['High', 'Medium', 'Low'];
-// A plan change needs both the verb and a plan noun close together, so
-// "upgrade the editor to support markdown" stays a feature request.
-export const PLAN_CHANGE = /\b(upgrad(e|ing)|downgrad(e|ing)|cancel(l?ing)?|switch(ing)?|chang(e|ing)|renew(ing)?)\b(\s+[\w'-]+){0,4}?\s+(plan|subscription|tier|membership|license|seats?)\b|\b(upgrad(e|ing)|downgrad(e|ing))\s+to\s+(the\s+)?(pro|premium|business|enterprise|team|basic|starter|annual|monthly)\b|\bcancel(l?ing)?\s+(my|our|the)\s+account\b/i;
+export const DEFAULT_CATEGORY_NAMES = ['Billing Issue', 'Technical Problem', 'Feature Request', 'General Inquiry', 'Positive Feedback'];
 
-const SYSTEM_PROMPT = `You triage customer support messages for a support team. Reply in exactly this format:
-Category: <one of: Billing Issue, Technical Problem, Feature Request, General Inquiry, Positive Feedback>
-Category reasoning: <one or two sentences explaining why>
-Urgency: <High, Medium, or Low>
-Urgency reasoning: <one or two sentences explaining why>
-Recommended action: <one sentence telling the support team what to do next>
-
-Category guide:
-- Billing Issue: payments, charges, invoices, refunds, and plan or subscription changes such as upgrades, downgrades and cancellations. Asking to upgrade or change a plan is a Billing Issue, never a Feature Request.
-- Technical Problem: bugs, errors, slowness, or anything not working.
-- Feature Request: asks for a new capability or improvement to the product itself (not plans or pricing).
-- General Inquiry: a question that is not about billing or a problem.
-- Positive Feedback: thanks or praise with no request.
-
-Urgency guide:
-- High: an outage or production system down, the customer cannot access or use the product, data loss, a security issue, or a payment failure that blocks access.
-- Medium: degraded performance, non-blocking bugs, or billing errors that do not block access.
-- Low: feature requests, general questions, routine plan or upgrade requests, and praise.
-Punctuation, tone, message length and time of day must not affect urgency.`;
-
-/**
- * Analyze a customer support message using Groq AI
- *
- * @param {string} message - The customer support message
- * @returns {Promise<{category: string, reasoning: string, urgency: string, urgencyReasoning: string, recommendedAction: string, usedFallback: boolean}>}
- */
-export async function categorizeMessage(message) {
-  try {
-    const response = await getGroqClient().chat.completions.create({
-      model: "allam-2-7b", // Most generous Groq free tier available on this account (7,000 requests/day)
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Triage this customer support message: ${message}` }
-      ],
-      temperature: 0.2,
-      max_tokens: 400,
-    });
-
-    return { ...parseAiResponse(response.choices[0].message.content, message), usedFallback: false };
-  } catch (error) {
-    console.warn('Groq API failed, using keyword fallback:', error.message);
-    return { ...getKeywordAnalysis(message), usedFallback: true };
-  }
-}
-
-/**
- * Parse the labeled lines of the AI reply. Any field that is missing or invalid
- * is filled in from the keyword rules so the UI never shows an empty field.
- */
-function parseAiResponse(content, message) {
-  const fields = {};
-  let current = null;
-  for (const line of content.split('\n')) {
-    const labeled = line.match(/^\W*(category reasoning|reasoning|category|urgency reasoning|urgency|recommended action)\s*:\s*(.*)$/i);
-    if (labeled) {
-      current = labeled[1].toLowerCase();
-      // Smaller models often use a bare "Reasoning:" label for both reasonings, in order
-      if (current === 'reasoning') {
-        current = fields['category reasoning'] === undefined ? 'category reasoning' : 'urgency reasoning';
-      }
-      fields[current] = labeled[2];
-    } else if (current && current !== 'category' && current !== 'urgency' && line.trim()) {
-      fields[current] += ' ' + line.trim();
-    }
-  }
-  const clean = value => value?.replace(/^[\s*_]+|[\s*_]+$/g, '') || '';
-
-  const categoryText = clean(fields.category).toLowerCase();
-  const category = Object.keys(CATEGORY_RULES).find(name => categoryText.includes(name.toLowerCase()));
-  const urgency = URGENCY_LEVELS.find(level => clean(fields.urgency).toLowerCase().startsWith(level.toLowerCase()));
-
-  const fallback = getKeywordAnalysis(message);
-
-  // Business rule: plan changes are billing, even if a small model files them elsewhere
-  if (PLAN_CHANGE.test(message) && category !== 'Billing Issue' && category !== 'Technical Problem') {
-    const planUrgency = calculateUrgency(message, 'Billing Issue');
-    return {
-      category: 'Billing Issue',
-      reasoning: 'Upgrading, downgrading or cancelling a plan is handled as a billing request.',
-      urgency: planUrgency.urgency === 'High' ? 'High' : 'Low',
-      urgencyReasoning: planUrgency.urgency === 'High' ? planUrgency.reasoning : 'A routine plan change request is not time-sensitive.',
-      recommendedAction: getRecommendedAction('Billing Issue', planUrgency.urgency),
-    };
-  }
-
-  const finalCategory = category ?? fallback.category;
-  const finalUrgency = urgency ?? calculateUrgency(message, finalCategory).urgency;
-
-  return {
-    category: finalCategory,
-    reasoning: clean(fields['category reasoning']) || (category ? 'The AI did not explain this category.' : fallback.reasoning),
-    urgency: finalUrgency,
-    urgencyReasoning: clean(fields['urgency reasoning']) || calculateUrgency(message, finalCategory).reasoning,
-    recommendedAction: clean(fields['recommended action']) || getRecommendedAction(finalCategory, finalUrgency),
-  };
-}
-
-/**
- * Keyword rules per category. Each rule is a whole-word regex with a weight:
- * phrases weigh more than single words, so "payment failed" outranks a lone "issue".
- */
-const CATEGORY_RULES = {
-  "Billing Issue": [
-    { pattern: /\bpayment (failed|declined|issue|problem)/, weight: 3 },
-    { pattern: /\b(double|over)[- ]?charged\b/, weight: 2 },
-    { pattern: /\bcredit card\b/, weight: 2 },
-    { pattern: PLAN_CHANGE, weight: 3, label: 'plan change' },
-    { pattern: /\bbill(s|ed|ing)?\b/, weight: 1 },
-    { pattern: /\bpayments?\b/, weight: 1 },
-    { pattern: /\bcharg(e|es|ed|ing)\b/, weight: 1 },
-    { pattern: /\binvoices?\b/, weight: 1 },
-    { pattern: /\brefunds?\b/, weight: 1 },
-    { pattern: /\bsubscriptions?\b/, weight: 1 },
-    { pattern: /\bplans?\b/, weight: 1 },
-    { pattern: /\breceipts?\b/, weight: 1 },
-    { pattern: /\bpric(e|es|ing)\b/, weight: 1 },
-  ],
-  "Technical Problem": [
-    { pattern: /\bnot working\b/, weight: 2 },
-    { pattern: /\b(can't|cannot|unable to) (log ?in|sign ?in|access|load|open)\b/, weight: 2 },
-    { pattern: /\b(doesn't|does not|won't|will not) (work|load|open)\b/, weight: 2 },
-    { pattern: DOWN_PATTERN, weight: 2, label: 'down' },
-    { pattern: CONNECTION_LOST_PATTERN, weight: 2, label: 'connection problem' },
-    { pattern: /\bdatabase\b/, weight: 1 },
-    { pattern: /\bbugs?\b/, weight: 1 },
-    { pattern: /\berrors?\b/, weight: 1 },
-    { pattern: /\bbroken\b/, weight: 1 },
-    { pattern: /\bcrash(es|ed|ing)?\b/, weight: 1 },
-    { pattern: /\boutages?\b/, weight: 1 },
-    { pattern: /\bservers?\b/, weight: 1 },
-    { pattern: /\bproduction\b/, weight: 1 },
-    { pattern: /\bslow(ly)?\b/, weight: 1 },
-    { pattern: /\bloading\b/, weight: 1 },
-    { pattern: /\bfreez(e|es|ing)\b|\bfrozen\b/, weight: 1 },
-    { pattern: /\bglitch(es)?\b/, weight: 1 },
-    { pattern: /\bfail(s|ed|ing|ure)?\b/, weight: 1 },
-    { pattern: /\bissues?\b/, weight: 1 },
-    { pattern: /(?<!no )\bproblems?\b/, weight: 1 },
-  ],
-  "Feature Request": [
-    { pattern: /\b(can|could|would) you (please )?add\b/, weight: 2 },
-    { pattern: /\bplease add\b/, weight: 2 },
-    { pattern: /\bwould (like to see|love to see|be great|be nice)\b/, weight: 2 },
-    { pattern: /\bfeatures?\b/, weight: 1 },
-    { pattern: /\bsuggest(ion|ions|ed)?\b/, weight: 1 },
-    { pattern: /\bimprove(ment|ments)?\b/, weight: 1 },
-    { pattern: /\benhancements?\b/, weight: 1 },
-    { pattern: /\bwish\b/, weight: 1 },
-  ],
-  "General Inquiry": [
-    { pattern: /\b(can i|is there|do you|are there)\b/, weight: 1.5 },
-    { pattern: /\b(how|what|when|where|which|why)\b/, weight: 1 },
-    { pattern: /\?/, weight: 0.5, label: '?' },
-  ],
-  "Positive Feedback": [
-    // Gratitude only counts when the message isn't a "thanks, but..." complaint
-    { pattern: /^(?!.*\b(but|however)\b).*\b(thanks?|thank you|appreciate)\b/, weight: 1, label: 'thanks' },
-    { pattern: /\bkeep up the (great|good) work\b/, weight: 2 },
-    { pattern: /\b(great|amazing|excellent|awesome|fantastic|wonderful) (job|work|service|support|product)\b/, weight: 2 },
-    { pattern: /\b(really |very )?(happy|satisfied|pleased) with\b/, weight: 1 },
-    { pattern: /\bi (love|really like) (using|your|the)\b/, weight: 1 },
-    { pattern: /\b(amazing|excellent|awesome|fantastic|wonderful)\b/, weight: 1 },
-  ],
+/** Why the keyword fallback was used, in words an agent can act on. */
+export const FALLBACK_MESSAGES = {
+  missing_key: 'No Groq API key is set on the server. Add GROQ_API_KEY to .env.local (or your Vercel project) and restart.',
+  invalid_key: 'The Groq API key was rejected. Check GROQ_API_KEY.',
+  rate_limited: 'The Groq free-tier rate limit was hit. Wait a minute and try again.',
+  model_unavailable: 'The configured Groq model is not available on this account. Set GROQ_MODEL to one listed at console.groq.com.',
+  ai_unreachable: 'The server could not reach Groq.',
+  ai_error: 'The AI returned an error.',
+  unparseable: 'The AI reply could not be read.',
+  network: 'The app could not reach its own /api/triage endpoint.',
 };
 
 /**
- * Keyword-based fallback used when the AI is unavailable.
- * Scores every category and picks the highest; ties or no matches return
- * "Unknown" (which templates.js maps to manual review) instead of guessing.
- * Urgency and the recommended action come from the rule-based helpers.
+ * Analyze a customer support message.
+ *
+ * @param {string} message
+ * @param {{categories?: {name: string, description?: string}[], examples?: object[], actionFor?: Function, signal?: AbortSignal}} options
+ * @returns {Promise<object>} analysis, with usedFallback and fallbackReason
  */
-function getKeywordAnalysis(message) {
-  const { category, reasoning } = getKeywordCategorization(message);
-  const { urgency, reasoning: urgencyReasoning } = calculateUrgency(message, category);
-  return {
-    category,
-    reasoning,
-    urgency,
-    urgencyReasoning,
-    recommendedAction: getRecommendedAction(category, urgency)
-  };
+export async function categorizeMessage(message, options = {}) {
+  const { categories, examples, actionFor = getRecommendedAction, signal } = options;
+  const categoryNames = categories?.length ? categories.map(c => c.name) : DEFAULT_CATEGORY_NAMES;
+  const fallback = reason => ({ ...getKeywordAnalysis(message, actionFor), usedFallback: true, fallbackReason: reason });
+
+  let response;
+  try {
+    response = await fetch('/api/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, categories, examples }),
+      signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    return fallback('network');
+  }
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.warn('AI triage unavailable, using keyword fallback:', body.error, body.detail || '');
+    return fallback(FALLBACK_MESSAGES[body.error] ? body.error : 'ai_error');
+  }
+
+  const parsed = parseAiResponse(body.content, message, { categoryNames, actionFor });
+  if (!parsed) return fallback('unparseable');
+  return { ...parsed, model: body.model, usedFallback: false, fallbackReason: null };
 }
 
-function getKeywordCategorization(message) {
-  const text = message.toLowerCase().replace(/[‘’]/g, "'");
-
-  const scored = Object.entries(CATEGORY_RULES).map(([category, rules]) => {
-    let score = 0;
-    const matches = [];
-    for (const { pattern, weight, label } of rules) {
-      const match = text.match(pattern);
-      if (match) {
-        score += weight;
-        matches.push(label || match[0].trim());
-      }
+/** Read a JSON object out of the model's reply, tolerating code fences or extra text. */
+function readJson(content) {
+  if (typeof content !== 'string') return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
     }
-    return { category, score, matches };
-  });
+  }
+}
 
-  const best = Math.max(...scored.map(s => s.score));
-  const leaders = scored.filter(s => s.score === best);
+const text = value => (typeof value === 'string' ? value.trim() : '');
+const pick = (value, allowed) => allowed.find(option => option.toLowerCase() === text(value).toLowerCase());
 
-  if (best === 0) {
+/**
+ * Turn the AI's JSON into an analysis. Missing or invalid fields are filled in
+ * from the keyword rules so the UI never shows an empty field. Returns null
+ * when the reply isn't JSON at all.
+ */
+export function parseAiResponse(content, message, { categoryNames = DEFAULT_CATEGORY_NAMES, actionFor = getRecommendedAction } = {}) {
+  const data = readJson(content);
+  if (!data || typeof data !== 'object') return null;
+
+  const category = pick(data.category, categoryNames)
+    // Tolerate "Billing" for "Billing Issue" and similar
+    ?? categoryNames.find(name => text(data.category) && name.toLowerCase().includes(text(data.category).toLowerCase()));
+  const urgency = pick(data.urgency, URGENCY_LEVELS);
+  const keyword = getKeywordAnalysis(message, actionFor);
+
+  const extras = {
+    confidence: pick(data.confidence, CONFIDENCE_LEVELS) ?? 'Medium',
+    sentiment: pick(data.sentiment, SENTIMENTS) ?? keyword.sentiment,
+    productArea: text(data.productArea).slice(0, 60),
+    language: text(data.language).slice(0, 30),
+    suggestedReply: text(data.suggestedReply),
+  };
+
+  // Business rule: plan changes are billing, even if the model files them elsewhere
+  if (categoryNames.includes('Billing Issue') && PLAN_CHANGE.test(message) && category !== 'Billing Issue' && category !== 'Technical Problem') {
+    const planUrgency = calculateUrgency(message, 'Billing Issue');
+    const finalUrgency = planUrgency.urgency === 'High' ? 'High' : 'Low';
     return {
-      category: "Unknown",
-      reasoning: "No clear keywords matched. Manual review recommended."
+      ...extras,
+      category: 'Billing Issue',
+      reasoning: 'Upgrading, downgrading or cancelling a plan is handled as a billing request.',
+      urgency: finalUrgency,
+      urgencyReasoning: finalUrgency === 'High' ? planUrgency.reasoning : 'A routine plan change request is not time-sensitive.',
+      recommendedAction: actionFor('Billing Issue', finalUrgency),
     };
   }
 
-  if (leaders.length > 1) {
-    return {
-      category: "Unknown",
-      reasoning: `Mixed signals (${leaders.map(l => l.category).join(', ')}). Manual review recommended.`
-    };
-  }
+  const finalCategory = category ?? keyword.category;
+  const urgencyRule = calculateUrgency(message, finalCategory);
+  const finalUrgency = urgency ?? urgencyRule.urgency;
 
-  const [winner] = leaders;
   return {
-    category: winner.category,
-    reasoning: `Matched keywords: ${winner.matches.join(', ')} → ${winner.category}.`
+    ...extras,
+    // An answer we had to patch from keyword rules is less trustworthy
+    confidence: category && urgency ? extras.confidence : 'Low',
+    category: finalCategory,
+    reasoning: text(data.categoryReasoning) || (category ? 'The AI did not explain this category.' : keyword.reasoning),
+    urgency: finalUrgency,
+    urgencyReasoning: (urgency && text(data.urgencyReasoning)) || urgencyRule.reasoning,
+    recommendedAction: text(data.recommendedAction) || actionFor(finalCategory, finalUrgency),
   };
 }
