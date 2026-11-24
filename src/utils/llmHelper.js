@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { calculateUrgency } from './urgencyScorer';
+import { calculateUrgency, DOWN_PATTERN, CONNECTION_LOST_PATTERN } from './urgencyScorer';
 import { getRecommendedAction } from './templates';
 
 /**
@@ -21,7 +21,9 @@ function getGroqClient() {
 }
 
 const URGENCY_LEVELS = ['High', 'Medium', 'Low'];
-const PLAN_CHANGE = /\b(upgrade|upgrading|downgrade|downgrading|cancel(l?ing)? (my|our|the)? ?(account|subscription|plan))\b/i;
+// A plan change needs both the verb and a plan noun close together, so
+// "upgrade the editor to support markdown" stays a feature request.
+export const PLAN_CHANGE = /\b(upgrad(e|ing)|downgrad(e|ing)|cancel(l?ing)?|switch(ing)?|chang(e|ing)|renew(ing)?)\b(\s+[\w'-]+){0,4}?\s+(plan|subscription|tier|membership|license|seats?)\b|\b(upgrad(e|ing)|downgrad(e|ing))\s+to\s+(the\s+)?(pro|premium|business|enterprise|team|basic|starter|annual|monthly)\b|\bcancel(l?ing)?\s+(my|our|the)\s+account\b/i;
 
 const SYSTEM_PROMPT = `You triage customer support messages for a support team. Reply in exactly this format:
 Category: <one of: Billing Issue, Technical Problem, Feature Request, General Inquiry, Positive Feedback>
@@ -113,7 +115,7 @@ function parseAiResponse(content, message) {
 
   return {
     category: finalCategory,
-    reasoning: clean(fields['category reasoning']) || (category ? content : fallback.reasoning),
+    reasoning: clean(fields['category reasoning']) || (category ? 'The AI did not explain this category.' : fallback.reasoning),
     urgency: finalUrgency,
     urgencyReasoning: clean(fields['urgency reasoning']) || calculateUrgency(message, finalCategory).reasoning,
     recommendedAction: clean(fields['recommended action']) || getRecommendedAction(finalCategory, finalUrgency),
@@ -129,8 +131,7 @@ const CATEGORY_RULES = {
     { pattern: /\bpayment (failed|declined|issue|problem)/, weight: 3 },
     { pattern: /\b(double|over)[- ]?charged\b/, weight: 2 },
     { pattern: /\bcredit card\b/, weight: 2 },
-    { pattern: /\bcancel(l?ing)? (my|our|the)? ?(account|subscription|plan)\b/, weight: 2 },
-    { pattern: /\b(upgrade|upgrading|downgrade|downgrading)\b/, weight: 2 },
+    { pattern: PLAN_CHANGE, weight: 3, label: 'plan change' },
     { pattern: /\bbill(s|ed|ing)?\b/, weight: 1 },
     { pattern: /\bpayments?\b/, weight: 1 },
     { pattern: /\bcharg(e|es|ed|ing)\b/, weight: 1 },
@@ -145,7 +146,9 @@ const CATEGORY_RULES = {
     { pattern: /\bnot working\b/, weight: 2 },
     { pattern: /\b(can't|cannot|unable to) (log ?in|sign ?in|access|load|open)\b/, weight: 2 },
     { pattern: /\b(doesn't|does not|won't|will not) (work|load|open)\b/, weight: 2 },
-    { pattern: /\b(is|are|was|went) down\b/, weight: 2 },
+    { pattern: DOWN_PATTERN, weight: 2, label: 'down' },
+    { pattern: CONNECTION_LOST_PATTERN, weight: 2, label: 'connection problem' },
+    { pattern: /\bdatabase\b/, weight: 1 },
     { pattern: /\bbugs?\b/, weight: 1 },
     { pattern: /\berrors?\b/, weight: 1 },
     { pattern: /\bbroken\b/, weight: 1 },

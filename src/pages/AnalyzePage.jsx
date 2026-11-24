@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { categorizeMessage } from '../utils/llmHelper'
+import { addToHistory, makeId } from '../utils/storage'
 
 function AnalyzePage() {
   const [message, setMessage] = useState('')
@@ -31,6 +32,8 @@ function AnalyzePage() {
         await categorizeMessage(message)
 
       const analysisResult = {
+        id: makeId(),
+        status: 'Open',
         message,
         category,
         urgency,
@@ -44,9 +47,7 @@ function AnalyzePage() {
       setResults(analysisResult)
 
       // Save to history
-      const history = JSON.parse(localStorage.getItem('triageHistory') || '[]')
-      history.push(analysisResult)
-      localStorage.setItem('triageHistory', JSON.stringify(history))
+      addToHistory([analysisResult])
     } catch (error) {
       console.error('Error analyzing message:', error)
       alert('Error analyzing message. Please try again.')

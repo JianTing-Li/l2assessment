@@ -1,30 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { loadHistory as readHistory, clearHistory as wipeHistory, sortByNewest } from '../utils/storage'
 
 function HistoryPage() {
-  const [history, setHistory] = useState([])
+  const [history, setHistory] = useState(readHistory)
   const [filter, setFilter] = useState('all')
-  const [expandedIndex, setExpandedIndex] = useState(null)
-
-  useEffect(() => {
-    loadHistory()
-  }, [])
-
-  const loadHistory = () => {
-    const savedHistory = JSON.parse(localStorage.getItem('triageHistory') || '[]')
-    setHistory(savedHistory)
-  }
+  const [expandedId, setExpandedId] = useState(null)
 
   const clearHistory = () => {
     if (window.confirm('Are you sure you want to clear all history?')) {
-      localStorage.setItem('triageHistory', '[]')
+      wipeHistory()
       setHistory([])
     }
   }
 
-  const sortedHistory = [...history].sort((a, b) => 
-    a.message.localeCompare(b.message)
-  )
+  const sortedHistory = sortByNewest(history)
   
   const filteredHistory = filter === 'all' 
     ? sortedHistory 
@@ -99,14 +89,14 @@ function HistoryPage() {
         )}
 
         <div className="space-y-4">
-          {filteredHistory.map((item, index) => (
+          {filteredHistory.map((item) => (
             <div
-              key={index}
+              key={item.id}
               className="bg-white rounded-lg shadow-md overflow-hidden"
             >
               <div
                 className="p-4 cursor-pointer hover:bg-gray-50"
-                onClick={() => setExpandedIndex(expandedIndex === index ? null : index)}
+                onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -135,12 +125,12 @@ function HistoryPage() {
                     </div>
                   </div>
                   <div className="text-gray-400 ml-4">
-                    {expandedIndex === index ? '▲' : '▼'}
+                    {expandedId === item.id ? '▲' : '▼'}
                   </div>
                 </div>
               </div>
 
-              {expandedIndex === index && (
+              {expandedId === item.id && (
                 <div className="border-t border-gray-200 p-4 bg-gray-50">
                   <div className="space-y-3">
                     <div>

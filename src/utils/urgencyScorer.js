@@ -14,9 +14,16 @@ const BASE_URGENCY = {
   "Unknown": "Medium"
 }
 
+// "Server down", "site is down", "everything went down" (but not "slow down" or "download")
+export const DOWN_PATTERN = /\b(servers?|site|website|app|apps|service|services|system|systems|database|db|api|platform|everything|portal|checkout|login|network)( is| are| was| went| goes| has gone| seems| appears to be)? (completely |totally )?down\b|\b(is|are|was|went|goes|has gone) (completely |totally )?down\b|\bdowntime\b/
+
+// "Database connection lost", "lost connection", "keeps disconnecting"
+export const CONNECTION_LOST_PATTERN = /\b(connection|database|db) (was |is |has been )?(lost|dropped|refused|failed|down)\b|\b(lost|losing|no) connection\b|\bdisconnect(ed|ing|s)?\b/
+
 // Signals that a customer is blocked or that something is broken for everyone
 const HIGH_SIGNALS = [
-  { pattern: /\b(is|are|was|went|goes|has gone) down\b|\bdowntime\b/, label: 'service down' },
+  { pattern: DOWN_PATTERN, label: 'service down' },
+  { pattern: CONNECTION_LOST_PATTERN, label: 'connection lost' },
   { pattern: /\boutages?\b/, label: 'outage' },
   { pattern: /\bproduction\b/, label: 'production' },
   { pattern: /\b(can't|cannot|unable to) (log ?in|sign ?in|access|use)\b/, label: "can't access" },
