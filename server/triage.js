@@ -3,29 +3,25 @@
  * Vite dev server (vite.config.js), so the Groq API key never reaches the browser.
  */
 
+import { DEFAULT_CATEGORIES } from '../shared/defaults.js'
+
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 // Groq's model list changes often; override with GROQ_MODEL if this one is retired
 export const DEFAULT_MODEL = 'openai/gpt-oss-20b'
 const MAX_MESSAGE_LENGTH = 5000
 
-export const DEFAULT_CATEGORIES = [
-  { name: 'Billing Issue', description: 'payments, charges, invoices, refunds, and plan or subscription changes such as upgrades, downgrades and cancellations. Asking to upgrade or change a plan is a Billing Issue, never a Feature Request.' },
-  { name: 'Technical Problem', description: 'bugs, errors, slowness, outages, or anything not working.' },
-  { name: 'Feature Request', description: 'asks for a new capability or improvement to the product itself (not plans or pricing).' },
-  { name: 'General Inquiry', description: 'a question that is not about billing or a problem.' },
-  { name: 'Positive Feedback', description: 'thanks or praise with no request.' },
-]
+const DEFAULT_PROMPT_CATEGORIES = DEFAULT_CATEGORIES.map(({ name, description }) => ({ name, description }))
 
 const clip = (value, max) => String(value ?? '').slice(0, max)
 
 /** Keep only well-formed categories from the client, or use the defaults. */
 export function sanitizeCategories(categories) {
-  if (!Array.isArray(categories)) return DEFAULT_CATEGORIES
+  if (!Array.isArray(categories)) return DEFAULT_PROMPT_CATEGORIES
   const clean = categories
     .filter(c => c && typeof c.name === 'string' && c.name.trim())
     .slice(0, 12)
     .map(c => ({ name: clip(c.name.trim(), 40), description: clip(c.description, 300) }))
-  return clean.length > 0 ? clean : DEFAULT_CATEGORIES
+  return clean.length > 0 ? clean : DEFAULT_PROMPT_CATEGORIES
 }
 
 /** Recent agent corrections, used as worked examples in the prompt. */
