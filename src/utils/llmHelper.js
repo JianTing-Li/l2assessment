@@ -77,6 +77,9 @@ function readJson(content) {
   }
 }
 
+/** "hi", "help", "???": too little to triage with any confidence. */
+export const isTooShort = message => message.trim().split(/\s+/).filter(word => /\w/.test(word)).length < 3;
+
 const text = value => (typeof value === 'string' ? value.trim() : '');
 const pick = (value, allowed) => allowed.find(option => option.toLowerCase() === text(value).toLowerCase());
 
@@ -123,8 +126,8 @@ export function parseAiResponse(content, message, { categoryNames = DEFAULT_CATE
 
   return {
     ...extras,
-    // An answer we had to patch from keyword rules is less trustworthy
-    confidence: category && urgency ? extras.confidence : 'Low',
+    // An answer patched from keyword rules, or a message too short to judge, needs a person
+    confidence: category && urgency && !isTooShort(message) ? extras.confidence : 'Low',
     category: finalCategory,
     reasoning: text(data.categoryReasoning) || (category ? 'The AI did not explain this category.' : keyword.reasoning),
     urgency: finalUrgency,
