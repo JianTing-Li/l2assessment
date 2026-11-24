@@ -62,8 +62,8 @@ Category guide:
 ${guide}
 
 Urgency guide:
-- High: an outage or production system down, the customer cannot access or use the product, data loss, a security issue, or a payment failure that blocks access.
-- Medium: degraded performance, non-blocking bugs, or billing errors that do not block access.
+- High: an outage, a production system or server down, a lost database or server connection, the customer cannot access or use the product, data loss, a security issue, a payment failure that blocks access, or the customer was charged twice or overcharged.
+- Medium: degraded performance or slowness, non-blocking bugs, or billing mistakes that have not cost the customer money.
 - Low: feature requests, general questions, routine plan or upgrade requests, and praise.
 Punctuation, tone, message length and time of day must not affect urgency.${exampleText}`
 }

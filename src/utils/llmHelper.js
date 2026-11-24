@@ -33,18 +33,25 @@ export const FALLBACK_MESSAGES = {
  * @returns {Promise<object>} analysis, with usedFallback and fallbackReason
  */
 export async function categorizeMessage(message, options = {}) {
-  const { categories, examples, actionFor = getRecommendedAction, signal } = options;
+  const { categories, examples, actionFor = getRecommendedAction, signal, retryDelay = 4000 } = options;
   const categoryNames = categories?.length ? categories.map(c => c.name) : DEFAULT_CATEGORY_NAMES;
   const fallback = reason => ({ ...getKeywordAnalysis(message, actionFor), usedFallback: true, fallbackReason: reason });
 
+  const request = () => fetch('/api/triage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, categories, examples }),
+    signal,
+  });
+
   let response;
   try {
-    response = await fetch('/api/triage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, categories, examples }),
-      signal,
-    });
+    response = await request();
+    // Free-tier limits are per minute; one short wait usually clears a batch spike
+    if (response.status === 429 && retryDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      response = await request();
+    }
   } catch (error) {
     if (error.name === 'AbortError') throw error;
     return fallback('network');

@@ -1,77 +1,119 @@
 {
+  "description": "Test messages with the category and urgency a support lead would expect. 'fallback' is what the offline keyword rules return when they differ (Unknown means they send it to manual review). Run with: npm test",
   "testMessages": [
     {
       "id": 1,
-      "title": "Production Emergency (Incorrectly marked Low)",
+      "title": "Database outage, short message",
       "message": "Database connection lost",
-      "expectedIssues": [
-        "Should be High urgency but marked as Low (too short)",
-        "Critical issue not recognized"
-      ]
+      "expected": {
+        "category": "Technical Problem",
+        "urgency": "High"
+      }
     },
     {
       "id": 2,
-      "title": "Friendly Thank You (Incorrectly marked High)",
+      "title": "Thank-you note",
       "message": "Thank you so much! Your team has been incredibly helpful and I really appreciate the fast response to my question earlier today!",
-      "expectedIssues": [
-        "Should be Low urgency but marked as High (contains '!')",
-        "Not an actual support issue"
-      ]
+      "expected": {
+        "category": "Positive Feedback",
+        "urgency": "Low"
+      }
     },
     {
       "id": 3,
-      "title": "Feature Request (Wrong Template)",
+      "title": "Feature request",
       "message": "Could you add an export to CSV feature? Would be really useful for my monthly reports.",
-      "expectedIssues": [
-        "Recommended action will be 'Ask user to check billing portal'",
-        "Wrong template for feature requests"
-      ]
+      "expected": {
+        "category": "Feature Request",
+        "urgency": "Low"
+      }
     },
     {
       "id": 4,
-      "title": "Billing + Technical Hybrid (Ambiguous)",
+      "title": "Payment failure blocking access",
       "message": "My payment failed and now I can't access the dashboard. Is there a bug or do I need to update my credit card?",
-      "expectedIssues": [
-        "Category unclear - could be Billing or Technical",
-        "May produce inconsistent results on repeated analysis"
-      ]
+      "expected": {
+        "category": "Billing Issue",
+        "urgency": "High"
+      }
     },
     {
       "id": 5,
-      "title": "Minimal Input (No Validation)",
+      "title": "Too short to classify",
       "message": "hi",
-      "expectedIssues": [
-        "No validation prevents submission",
-        "Poor quality results expected",
-        "Automatically marked as Low urgency"
-      ]
+      "expected": {
+        "category": "General Inquiry",
+        "urgency": "Low"
+      },
+      "fallback": {
+        "category": "Unknown"
+      }
     },
     {
       "id": 6,
-      "title": "Urgent Short Message",
+      "title": "Short outage report",
       "message": "Server down now",
-      "expectedIssues": [
-        "Marked as Low urgency due to short length",
-        "Actually very urgent"
-      ]
+      "expected": {
+        "category": "Technical Problem",
+        "urgency": "High"
+      }
     },
     {
       "id": 7,
-      "title": "Long Rambling Non-Urgent",
+      "title": "Long compliment",
       "message": "Hi! I was just browsing through your website and noticed you have a really nice design! I especially like the color scheme and the way you've organized the navigation menu! Everything looks so professional and clean! Just wanted to share my positive feedback!",
-      "expectedIssues": [
-        "Marked as High urgency due to multiple '!'",
-        "Actually not urgent at all - just positive feedback"
-      ]
+      "expected": {
+        "category": "Positive Feedback",
+        "urgency": "Low"
+      }
     },
     {
       "id": 8,
-      "title": "General Inquiry",
+      "title": "General question",
       "message": "What are your business hours?",
-      "expectedIssues": [
-        "Short message marked as Low urgency",
-        "Simple question with generic response"
-      ]
+      "expected": {
+        "category": "General Inquiry",
+        "urgency": "Low"
+      }
+    },
+    {
+      "id": 9,
+      "title": "Plan upgrade",
+      "message": "Can I upgrade my subscription to the pro plan?",
+      "expected": {
+        "category": "Billing Issue",
+        "urgency": "Low"
+      }
+    },
+    {
+      "id": 10,
+      "title": "Upgrade that is a feature request",
+      "message": "Please upgrade the editor so it supports markdown tables.",
+      "expected": {
+        "category": "Feature Request",
+        "urgency": "Low"
+      },
+      "fallback": {
+        "category": "Unknown"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Double charge",
+      "message": "I was charged twice for invoice INV-2041. Please refund the extra payment.",
+      "expected": {
+        "category": "Billing Issue",
+        "urgency": "High"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Slow dashboard",
+      "message": "The dashboard is loading very slowly today.",
+      "expected": {
+        "category": "Technical Problem",
+        "urgency": "Medium"
+      }
     }
   ]
 }

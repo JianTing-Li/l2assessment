@@ -2,12 +2,11 @@
  * Keyword rules: the offline fallback used when the AI is unavailable, plus
  * business rules applied on top of the AI's answer.
  */
-import { calculateUrgency, DOWN_PATTERN, CONNECTION_LOST_PATTERN } from './urgencyScorer';
+import { calculateUrgency, DOWN_PATTERN, CONNECTION_LOST_PATTERN, PLAN_CHANGE } from './urgencyScorer';
+
+export { PLAN_CHANGE };
 import { getRecommendedAction } from './templates';
 
-// A plan change needs both the verb and a plan noun close together, so
-// "upgrade the editor to support markdown" stays a feature request.
-export const PLAN_CHANGE = /\b(upgrad(e|ing)|downgrad(e|ing)|cancel(l?ing)?|switch(ing)?|chang(e|ing)|renew(ing)?)\b(\s+[\w'-]+){0,4}?\s+(plan|subscription|tier|membership|license|seats?)\b|\b(upgrad(e|ing)|downgrad(e|ing))\s+to\s+(the\s+)?(pro|premium|business|enterprise|team|basic|starter|annual|monthly)\b|\bcancel(l?ing)?\s+(my|our|the)\s+account\b/i;
 
 /**
  * Keyword rules per category. Each rule is a whole-word regex with a weight:
@@ -74,6 +73,7 @@ export const CATEGORY_RULES = {
     { pattern: /\b(really |very )?(happy|satisfied|pleased) with\b/, weight: 1 },
     { pattern: /\bi (love|really like) (using|your|the)\b/, weight: 1 },
     { pattern: /\b(amazing|excellent|awesome|fantastic|wonderful)\b/, weight: 1 },
+    { pattern: /\bpositive feedback\b|\b(really |so |very )?(nice|great|beautiful|clean|lovely) (design|look|layout|job|work)\b|\blooks (so |really |very )?(great|good|nice|professional|clean)\b/, weight: 2, label: 'praise' },
   ],
 };
 
